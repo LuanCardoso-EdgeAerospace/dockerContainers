@@ -1,0 +1,138 @@
+services:
+  gitlab:
+    user: root
+    container_name: gitlab-ce
+    image: gitlab/gitlab-ce:latest
+    restart: unless-stopped
+    hostname: git.srv1.internal
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'https://git.srv1.internal'
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        letsencrypt['enabled'] = false
+        nginx['enable'] = true
+    networks:
+      - gitnet
+    volumes:
+      - ./gitlab/config:/etc/gitlab
+      - ./gitlab/logs:/var/log/gitlab
+      - ./gitlab/data:/var/opt/gitlab
+      - ./gitlab/shm:/dev/shm/gitlab
+    ports:
+      - "2222:22"
+
+  nginx:
+    user: root
+    container_name: nginx-proxy
+    image: nginx:stable
+    restart: unless-stopped
+    networks:
+      - gitnet
+      - webnet
+      - wikinet
+      - partdbnet
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    ports:
+      - "192.168.2.2:443:443" 
+# The container that runs XWiki in Tomcat, with the appropriate JDBC driver (for mysql).
+  wiki:
+    image: "xwiki:${XWIKI_VERSION}-mysql-tomcat"
+    container_name: xwiki-mysql-tomcat-web2
+    restart: unless-stopped
+    depends_on:
+      - dbwiki
+    # ports:
+    #   - "8080:8080"
+    # Default values defined in .env file.
+    # The DB_USER/DB_PASSWORD/DB_DATABASE/DB_HOST variables are used in the hibernate.cfg.xml file.
+    environment:
+      - XWIKI_VERSION=${XWIKI_VERSION}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_HOST=dbwiki
+    # Provide a name instead of an auto-generated id for xwiki data (the permanent directory in included in it)
+    # configured in the Dockerfile, to make it simpler to identify in 'docker volume ls'.
+    volumes:
+      - ./xwiki/xwiki-data:/usr/local/xwiki
+    networks:
+      - wikinet
+  dbwiki:
+    image: "mysql:9"
+    container_name: xwiki-mysql-db2
+    restart: unless-stopped
+    # - Provide a name instead of an auto-generated id for the mysql data, to make it simpler to identify in
+    # 'docker volume ls'
+    # - Provide a SQL script to be executed when the db image starts (to set permissions to create subwikis)
+    volumes:
+      - ./xwiki/mysql-data:/var/lib/mysql
+      - ./xwiki/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    # Configure the MySQL database and create a user with provided name/password.
+    # See https://hub.docker.com/_/mysql/ for more details.
+    # Default values defined in .env file.
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_DATABASE}
+
+    # Pass arguments to configure the database
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_bin"
+      - "--explicit-defaults-for-timestamp=1"
+    networks:
+      - wikinet
+  partdb:
+      container_name: partdb
+      restart: unless-stopped
+      # By default Part-DB will be running under Port 8080, but I put it behind a proxy
+      networks:
+        - partdbnet
+      volumes:
+        # By default
+        - ./part_db/uploads:/var/www/html/uploads
+        - ./part_db/public_media:/var/www/html/public/media
+        - ./part_db/db:/var/www/html/var/db
+      image: jbtronics/part-db1:latest
+      environment:
+        # Put SQLite database in our mapped folder. You can configure some other kind of database here too.
+        - DATABASE_URL=sqlite:///%kernel.project_dir%/var/db/app.db
+        # In docker env logs will be redirected to stderr
+        - APP_ENV=docker
+
+        # You can configure Part-DB using environment variables
+        # See .env file for all available options or https://docs.part-db.de/configuration.html
+
+        - DEFAULT_LANG=en
+        - DEFAULT_TIMEZONE=Europe/Berlin
+        - BASE_CURRENCY=EUR
+        - INSTANCE_NAME=EdgeAerospace
+
+        # Allow users to download attachments to the server by providing an URL
+        # This could be a potential security issue, as the user can retrieve any file the server has access to (via internet)
+        - ALLOW_ATTACHMENT_DOWNLOADS=0
+        # Use gravatars for user avatars, when user has no own avatar defined
+        - USE_GRAVATAR=0
+
+        # Override value if you want to show a given text on homepage.
+        # When this is empty the content of config/banner.md is used as banner
+        - BANNER=EdgeAerospace Part-DB<br>Welcome to the internal parts database
+      
+        # If you use a reverse proxy in front of Part-DB, you must configure the trusted proxies IP addresses here (see reverse proxy documentation for more information):
+        - TRUSTED_PROXIES=127.0.0.0/8,::1,10.0.0.0/8,192.168.0.0/16  
+networks:
+  gitnet:
+    driver: bridge
+  webnet:
+    driver: bridge
+  wikinet:
+    driver: bridge
+  partdbnet:
+    driver: bridge
+
