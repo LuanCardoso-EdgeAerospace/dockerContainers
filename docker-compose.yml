@@ -33,9 +33,13 @@ services:
       - webnet
       - wikinet
       - partdbnet
+      - vaultwardennet
+      - inventreeNet
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      - ./inventree/inventree-data/static:/var/www/static:ro  
+      - ./inventree/inventree-data/media:/var/www/media:ro
     ports:
       - "192.168.2.2:443:443" 
 # The container that runs XWiki in Tomcat, with the appropriate JDBC driver (for mysql).
@@ -126,6 +130,22 @@ services:
       
         # If you use a reverse proxy in front of Part-DB, you must configure the trusted proxies IP addresses here (see reverse proxy documentation for more information):
         - TRUSTED_PROXIES=127.0.0.0/8,::1,10.0.0.0/8,192.168.0.0/16  
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    environment:
+      DOMAIN: "https://vw.srv1.internal"
+      ROCKET_PORT: 80
+      ROCKET_ADDRESS: 0.0.0.0
+      WEBSOCKET_ENABLED: "true"
+      LOG_LEVEL: "info"
+      ADMIN_TOKEN: "0993b9879b4140365b81f0c03ea802699647f1c6"
+    volumes:
+      - ./vw-data/:/data/
+    networks:
+      - vaultwardennet
+
 networks:
   gitnet:
     driver: bridge
@@ -134,5 +154,10 @@ networks:
   wikinet:
     driver: bridge
   partdbnet:
+    driver: bridge
+  vaultwardennet:
+    driver: bridge
+  inventreeNet:
+    name: inventree_Net
     driver: bridge
 
